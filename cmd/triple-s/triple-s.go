@@ -1,7 +1,7 @@
-package main
+package s3
 
 import "fmt"
 
-func main() {
+func Run() {
 	fmt.Println("triple-s")
 }
