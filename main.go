@@ -6,6 +6,6 @@ import (
 )
 
 func main() {
-	fmt.Println("dasd")
+	fmt.Println("main was started")
 	ts.Run()
 }
