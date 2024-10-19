@@ -4,30 +4,41 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 )
 
 func Run() {
-	fmt.Println("triple-s was started")
-
 	router := http.NewServeMux()
 
-	router.HandleFunc("/", createBucket)
+	// router.HandleFunc("/{BucketName}", createBucket)
+	router.HandleFunc("/", headers)
 	// http.HandleFunc("/headers", headers)
 
-	http.ListenAndServe(":8080", nil)
+	router.HandleFunc("POST /{bucketName}", createBucket)
+
+	fmt.Println("Server is listening to :8080")
+	http.ListenAndServe(":8080", router)
 }
 
 func createBucket(w http.ResponseWriter, req *http.Request) {
-	if req.Method != http.MethodPut {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// unnecessary check, because everything other than POST method will not be even considered in this case
+	// if req.Method != http.MethodPost {
+	// 	http.Error(w, "Method not allowed 123", http.StatusMethodNotAllowed)
+	// 	return
+	// }
+
+	path := req.URL.Path[1:]
+	fmt.Printf("Received request for path: '%s'\n", path)
+	if path == "" {
+		http.Error(w, "Bucket name is required", http.StatusBadRequest)
 		return
 	}
 
-	// Extract bucket name from the URL path (e.g., /kasl)
-	path := strings.TrimPrefix(req.URL.Path, "/")
-	if path == "" {
-		http.Error(w, "Bucket name is required", http.StatusBadRequest)
+	_, errStat := os.Stat("data/" + path)
+	if errStat == nil {
+		http.Error(w, "Bucket already exists", http.StatusConflict)
+		return
+	} else if !os.IsNotExist(errStat) {
+		http.Error(w, "Failed to check bucket existence: "+errStat.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -35,13 +46,16 @@ func createBucket(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		panic(err)
 	}
+
+	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Bucket was created\n")
 }
 
 func headers(w http.ResponseWriter, req *http.Request) {
-	for name, headers := range req.Header {
-		for _, h := range headers {
-			fmt.Fprintf(w, "%v: %v\n", name, h)
-		}
-	}
+	fmt.Fprintf(w, "RR is the ultimate car\n")
+	// for name, headers := range req.Header {
+	// 	for _, h := range headers {
+	// 		fmt.Fprintf(w, "%v: %v\n", name, h)
+	// 	}
+	// }
 }
