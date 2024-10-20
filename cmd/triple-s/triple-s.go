@@ -13,13 +13,29 @@ func Run() {
 	router.HandleFunc("/", headers)
 	// http.HandleFunc("/headers", headers)
 
-	router.HandleFunc("POST /{bucketName}", createBucket)
+	router.HandleFunc("POST /{bucketName}", CreateBuckets)
+	router.HandleFunc("GET /", GetBuckets)
 
 	fmt.Println("Server is listening to :8080")
 	http.ListenAndServe(":8080", router)
 }
 
-func createBucket(w http.ResponseWriter, req *http.Request) {
+func GetBuckets(w http.ResponseWriter, req *http.Request) {
+	dirSlice, err := os.ReadDir("data/")
+	if err != nil {
+		http.Error(w, "Failed to list directories: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for _, bucket := range dirSlice {
+		fmt.Println(bucket.Name())
+	}
+
+	w.WriteHeader(200)
+	fmt.Fprintf(w, "Buckets were listed\n")
+}
+
+func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	// unnecessary check, because everything other than POST method will not be even considered in this case
 	// if req.Method != http.MethodPost {
 	// 	http.Error(w, "Method not allowed 123", http.StatusMethodNotAllowed)
