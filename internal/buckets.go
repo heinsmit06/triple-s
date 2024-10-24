@@ -1,9 +1,11 @@
 package internal
 
 import (
+	"encoding/csv"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 )
 
 func CreateBuckets(w http.ResponseWriter, req *http.Request) {
@@ -50,20 +52,42 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Done with checking for errors, now creating the bucket and storing its metadata in csv file
+	// Done with checking for errors, now creating the bucket and storing its metadata in a csv file
 	err := os.MkdirAll("data/"+path, 0o755)
 	if err != nil {
 		panic(err)
 	}
 
-	// storing bucket metada in bucker metadata storage
-	// buckets_csv, ok := os.Create("buckets.csv"); !ok {
-	// 	http.Error(w, "Error creating buckets.csv", http.StatusInternalServerError)
-	// 	return
-	// }
+	// storing bucket metadata in metadata storage
+	buckets_csv, ok := os.OpenFile("data/buckets.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	if ok != nil {
+		http.Error(w, "Error creating buckets.csv", http.StatusInternalServerError)
+		return
+	}
+	defer buckets_csv.Close()
+
+	// preparing the bucket metadata
+	fileInfo, _ := os.Stat("data/" + path)
+	time_now := time.Now().Local().Format(time.RFC850)
+	bucket_field := []string{path, time_now, fileInfo.ModTime().Format(time.RFC850)}
+
+	// writing the metadata into the metadata storage
+	csv_writer := csv.NewWriter(buckets_csv)
+	csv_err := csv_writer.Write(bucket_field)
+	if csv_err != nil {
+		http.Error(w, "Error writing to CSV metadata storage", http.StatusInternalServerError)
+		return
+	}
+
+	// flushing the writer because writes are buffered and flush must be called in the end to actually write the record
+	csv_writer.Flush()
+	if csv_writer.Error() != nil {
+		http.Error(w, "Error flushing the writer", http.StatusInternalServerError)
+		return
+	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Bucket was created\n")
+	fmt.Fprintf(w, "Bucket was created and metadata is written\n")
 }
 
 func GetBuckets(w http.ResponseWriter, req *http.Request) {
