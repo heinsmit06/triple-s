@@ -2,11 +2,70 @@ package internal
 
 import (
 	"encoding/csv"
+	"encoding/xml"
 	"fmt"
 	"net/http"
 	"os"
 	"time"
 )
+
+type Bucket struct {
+	XMLName      xml.Name
+	Name         string
+	CreationTime string
+	LastModTime  string
+}
+
+type Buckets struct {
+	XMLName xml.Name
+	Buckets []Bucket
+}
+
+func GetBuckets(w http.ResponseWriter, req *http.Request) {
+	buckets_csv, err := os.Open("data/buckets.csv")
+	if err != nil {
+		http.Error(w, "Failed to list directories: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer buckets_csv.Close()
+
+	// Create a CSV reader
+	reader := csv.NewReader(buckets_csv)
+	records, err := reader.ReadAll()
+	if err != nil {
+		http.Error(w, "Failed to parse metadata file", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse records into the Buckets struct
+	var buckets []Bucket
+	for _, record := range records {
+		if len(record) < 2 {
+			continue // Skip malformed records
+		}
+		bucket := Bucket{
+			Name:         record[0],
+			CreationTime: record[1],
+			LastModTime:  record[2],
+		}
+		buckets = append(buckets, bucket)
+	}
+
+	// Create the XML response
+	response := Buckets{Buckets: buckets}
+
+	// Set the Content-Type header to "application/xml"
+	w.Header().Set("Content-Type", "application/xml")
+
+	// Encode the response as XML and write it to the response writer
+	if err := xml.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Failed to encode XML", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(200)
+	fmt.Fprintf(w, "Buckets were listed\n")
+}
 
 func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	// DONE. Bucket names must be unique across the system.
@@ -55,7 +114,8 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	// Done with checking for errors, now creating the bucket and storing its metadata in a csv file
 	err := os.MkdirAll("data/"+path, 0o755)
 	if err != nil {
-		panic(err)
+		http.Error(w, "Failed to create a bucket", http.StatusInternalServerError)
+		return
 	}
 
 	// storing bucket metadata in metadata storage
@@ -67,9 +127,8 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	defer buckets_csv.Close()
 
 	// preparing the bucket metadata
-	fileInfo, _ := os.Stat("data/" + path)
-	time_now := time.Now().Local().Format(time.RFC850)
-	bucket_field := []string{path, time_now, fileInfo.ModTime().Format(time.RFC850)}
+	time_now := time.Now().Format(time.RFC850)
+	bucket_field := []string{path, time_now, time_now} // bucket name, creationg time, last modified time
 
 	// writing the metadata into the metadata storage
 	csv_writer := csv.NewWriter(buckets_csv)
@@ -80,7 +139,7 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// flushing the writer because writes are buffered and flush must be called in the end to actually write the record
-	csv_writer.Flush()
+	defer csv_writer.Flush()
 	if csv_writer.Error() != nil {
 		http.Error(w, "Error flushing the writer", http.StatusInternalServerError)
 		return
@@ -88,21 +147,6 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, "Bucket was created and metadata is written\n")
-}
-
-func GetBuckets(w http.ResponseWriter, req *http.Request) {
-	dirSlice, err := os.ReadDir("data/")
-	if err != nil {
-		http.Error(w, "Failed to list directories: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	for _, bucket := range dirSlice {
-		fmt.Println(bucket.Name())
-	}
-
-	w.WriteHeader(200)
-	fmt.Fprintf(w, "Buckets were listed\n")
 }
 
 func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
