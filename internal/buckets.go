@@ -204,7 +204,7 @@ func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	for _, record := range records {
+	for i, record := range records {
 		if record[0] == path {
 			if record[3] == "True" {
 				err := os.Remove("data/" + path)
@@ -213,6 +213,14 @@ func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
 					return
 				} else {
 					DisplaySuccess(w, http.StatusOK, "Successfully deleted the bucket")
+					csv_writer := csv.NewWriter(buckets_csv)
+					for j, row := range records {
+						if j == i {
+							continue
+						}
+						csv_writer.Write(row)
+					}
+					defer csv_writer.Flush()
 					return
 				}
 			} else if record[3] == "False" {
