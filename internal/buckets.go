@@ -10,38 +10,82 @@ import (
 )
 
 type Bucket struct {
-	XMLName      xml.Name
-	Name         string
-	CreationTime string
-	LastModTime  string
+	XMLName      xml.Name `xml:"Bucket"`
+	Name         string   `xml:"Name"`
+	CreationTime string   `xml:"CreationTime"`
+	LastModTime  string   `xml:"LastModifiedTime"`
+	IsEmpty      string
 }
 
 type Buckets struct {
-	XMLName xml.Name
+	XMLName xml.Name `xml:"Buckets"`
 	Buckets []Bucket
+}
+
+type ErrorResponse struct {
+	XMLName    xml.Name `xml:"error"`
+	StatusCode int
+	Message    string
+}
+
+type SuccessResponse struct {
+	XMLName    xml.Name `xml:"success"`
+	StatusCode int
+	Message    string
+}
+
+func DisplayError(w http.ResponseWriter, statusCode int, message string, err error) {
+	errorResponse := ErrorResponse{
+		StatusCode: statusCode,
+		Message:    message + err.Error(),
+	}
+	out, _ := xml.MarshalIndent(errorResponse, " ", "  ")
+	w.Header().Set("Content-type", "application/xml")
+	w.WriteHeader(statusCode)
+	w.Write(out)
+}
+
+func DisplayErrorWoErr(w http.ResponseWriter, statusCode int, message string) {
+	errorResponse := ErrorResponse{
+		StatusCode: statusCode,
+		Message:    message,
+	}
+	out, _ := xml.MarshalIndent(errorResponse, " ", "  ")
+	w.Header().Set("Content-type", "application/xml")
+	w.WriteHeader(statusCode)
+	w.Write(out)
+}
+
+func DisplaySuccess(w http.ResponseWriter, statusCode int, message string) {
+	successResponse := SuccessResponse{
+		StatusCode: statusCode,
+		Message:    message,
+	}
+	out, _ := xml.MarshalIndent(successResponse, " ", "  ")
+	w.Header().Set("Content-type", "application/xml")
+	w.WriteHeader(statusCode)
+	w.Write(out)
 }
 
 func GetBuckets(w http.ResponseWriter, req *http.Request) {
 	buckets_csv, err := os.Open("data/buckets.csv")
 	if err != nil {
-		http.Error(w, "Failed to list directories: "+err.Error(), http.StatusInternalServerError)
+		DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
 		return
 	}
 	defer buckets_csv.Close()
 
-	// Create a CSV reader
 	reader := csv.NewReader(buckets_csv)
 	records, err := reader.ReadAll()
 	if err != nil {
-		http.Error(w, "Failed to parse metadata file", http.StatusInternalServerError)
+		DisplayError(w, 500, "Failed to parse metadata of buckets", err)
 		return
 	}
 
-	// Parse records into the Buckets struct
 	var buckets []Bucket
 	for _, record := range records {
-		if len(record) < 2 {
-			continue // Skip malformed records
+		if len(record) < 3 {
+			continue
 		}
 		bucket := Bucket{
 			Name:         record[0],
@@ -51,20 +95,16 @@ func GetBuckets(w http.ResponseWriter, req *http.Request) {
 		buckets = append(buckets, bucket)
 	}
 
-	// Create the XML response
-	response := Buckets{Buckets: buckets}
-
-	// Set the Content-Type header to "application/xml"
-	w.Header().Set("Content-Type", "application/xml")
-
-	// Encode the response as XML and write it to the response writer
-	if err := xml.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode XML", http.StatusInternalServerError)
+	response := Buckets{
+		Buckets: buckets,
+	}
+	w.Header().Set("Content-type", "application/xml")
+	out, err := xml.MarshalIndent(response, " ", "  ")
+	if err != nil {
+		DisplayError(w, 500, "Failed to encode XML", err)
 		return
 	}
-
-	w.WriteHeader(200)
-	fmt.Fprintf(w, "Buckets were listed\n")
+	w.Write(out)
 }
 
 func CreateBuckets(w http.ResponseWriter, req *http.Request) {
@@ -77,26 +117,26 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path[1:]
 	fmt.Printf("Received request for path: '%s'\n", path)
 	if path == "" {
-		http.Error(w, "Bucket name is required", http.StatusBadRequest)
+		DisplayErrorWoErr(w, http.StatusBadRequest, "Bucket name is required")
 		return
 	} else if len(path) < 3 || len(path) > 63 {
-		http.Error(w, "Incorrect bucket name length: must be between 3-63 chars", http.StatusBadRequest)
+		DisplayErrorWoErr(w, http.StatusBadRequest, "Incorrect bucket name length: must be between 3-63 chars")
 		return
 	} else if path[0] == '-' || path[len(path)-1] == '-' {
-		http.Error(w, "Must not begin or end with a hyphen", http.StatusBadRequest)
+		DisplayErrorWoErr(w, http.StatusBadRequest, "Must not begin or end with a hyphen")
 		return
 	}
 
 	for idx, ch := range path {
 		if !((ch >= 97 && ch <= 122) || (ch >= 48 && ch <= 57) || (ch == '-') || (ch == '.')) {
-			http.Error(w, "Forbidden rune is used in Bucket name", 400)
+			DisplayErrorWoErr(w, http.StatusBadRequest, "Forbidden rune is used in Bucket name")
 			return
 		} else if idx <= (len(path) - 2) {
 			if ch == '.' && path[idx+1] == '.' {
-				http.Error(w, "Two consecutive periods are not allowed", http.StatusBadRequest)
+				DisplayErrorWoErr(w, http.StatusBadRequest, "Two consecutive periods are not allowed")
 				return
 			} else if ch == '-' && path[idx+1] == '-' {
-				http.Error(w, "Two consecutive dashes are not allowed", http.StatusBadRequest)
+				DisplayErrorWoErr(w, http.StatusBadRequest, "Two consecutive dashes are not allowed")
 				return
 			}
 		}
@@ -104,50 +144,83 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 
 	_, errStat := os.Stat("data/" + path)
 	if errStat == nil {
-		http.Error(w, "Bucket already exists", http.StatusConflict)
+		DisplayErrorWoErr(w, http.StatusConflict, "Bucket already exists")
 		return
 	} else if !os.IsNotExist(errStat) {
-		http.Error(w, "Failed to check bucket existence: "+errStat.Error(), http.StatusInternalServerError)
+		DisplayError(w, http.StatusInternalServerError, "Failed to check bucket existence: ", errStat)
 		return
 	}
 
-	// Done with checking for errors, now creating the bucket and storing its metadata in a csv file
+	// done with checking for errors, now creating the bucket and storing its metadata in a csv file
 	err := os.MkdirAll("data/"+path, 0o755)
 	if err != nil {
-		http.Error(w, "Failed to create a bucket", http.StatusInternalServerError)
+		DisplayError(w, http.StatusInternalServerError, "Failed to create a bucket", err)
 		return
 	}
 
 	// storing bucket metadata in metadata storage
 	buckets_csv, ok := os.OpenFile("data/buckets.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if ok != nil {
-		http.Error(w, "Error creating buckets.csv", http.StatusInternalServerError)
+		DisplayError(w, http.StatusInternalServerError, "Error creating buckets.csv", ok)
 		return
 	}
 	defer buckets_csv.Close()
 
 	// preparing the bucket metadata
 	time_now := time.Now().Format(time.RFC850)
-	bucket_field := []string{path, time_now, time_now} // bucket name, creationg time, last modified time
+	bucket_field := []string{path, time_now, time_now, "True"} // bucket name, creation time, last modified time, emptiness of a bucket
 
 	// writing the metadata into the metadata storage
 	csv_writer := csv.NewWriter(buckets_csv)
 	csv_err := csv_writer.Write(bucket_field)
 	if csv_err != nil {
-		http.Error(w, "Error writing to CSV metadata storage", http.StatusInternalServerError)
+		DisplayError(w, http.StatusInternalServerError, "Error writing to CSV metadata storage", csv_err)
 		return
 	}
 
 	// flushing the writer because writes are buffered and flush must be called in the end to actually write the record
 	defer csv_writer.Flush()
 	if csv_writer.Error() != nil {
-		http.Error(w, "Error flushing the writer", http.StatusInternalServerError)
+		DisplayError(w, http.StatusInternalServerError, "Error flushing the writer", csv_writer.Error())
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "Bucket was created and metadata is written\n")
+	DisplaySuccess(w, http.StatusOK, "Bucket was created and metadata is written")
 }
 
 func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
+	path := req.URL.Path[1:]
+	buckets_csv, err := os.Open("data/buckets.csv")
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv", err)
+		return
+	}
+	defer buckets_csv.Close()
+
+	csv_reader := csv.NewReader(buckets_csv)
+	records, err := csv_reader.ReadAll()
+	if err != nil {
+		DisplayError(w, 500, "Failed to parse metadata of buckets", err)
+		return
+	}
+
+	for _, record := range records {
+		if record[0] == path {
+			if record[3] == "True" {
+				err := os.Remove("data/" + path)
+				if err != nil {
+					DisplayError(w, http.StatusInternalServerError, "Failed to delete the bucket", err)
+					return
+				} else {
+					DisplaySuccess(w, http.StatusOK, "Successfully deleted the bucket")
+					return
+				}
+			} else if record[3] == "False" {
+				DisplayErrorWoErr(w, http.StatusMethodNotAllowed, "Failed to delete the bucket - it is not empty")
+				return
+			}
+		}
+	}
+
+	DisplayErrorWoErr(w, http.StatusNotFound, "There is no such bucket")
 }
