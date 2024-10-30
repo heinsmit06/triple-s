@@ -189,14 +189,16 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 }
 
 func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
+	// getting a path from http.Request and opening csv storage to read the data from
 	path := req.URL.Path[1:]
-	buckets_csv, err := os.Open("data/buckets.csv")
+	buckets_csv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
 	if err != nil {
 		DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv", err)
 		return
 	}
 	defer buckets_csv.Close()
 
+	// creating a new csv reader and ReadAll of its rows
 	csv_reader := csv.NewReader(buckets_csv)
 	records, err := csv_reader.ReadAll()
 	if err != nil {
@@ -204,31 +206,56 @@ func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	for i, record := range records {
-		if record[0] == path {
-			if record[3] == "True" {
-				err := os.Remove("data/" + path)
-				if err != nil {
-					DisplayError(w, http.StatusInternalServerError, "Failed to delete the bucket", err)
-					return
-				} else {
-					DisplaySuccess(w, http.StatusOK, "Successfully deleted the bucket")
-					csv_writer := csv.NewWriter(buckets_csv)
-					for j, row := range records {
-						if j == i {
-							continue
-						}
-						csv_writer.Write(row)
-					}
-					defer csv_writer.Flush()
-					return
-				}
-			} else if record[3] == "False" {
-				DisplayErrorWoErr(w, http.StatusMethodNotAllowed, "Failed to delete the bucket - it is not empty")
-				return
-			}
+	var updatedRecords [][]string
+	var present, empty bool
+	// checking each record if the bucket name is equal to bucket name for deletion
+	for _, record := range records {
+		if record[0] != path {
+			updatedRecords = append(updatedRecords, record)
+		} else if record[0] == path && record[3] == "True" {
+			present = true
+			empty = true
+		} else if record[0] == path && record[3] == "False" {
+			present = true
+			empty = false
 		}
 	}
 
-	DisplayErrorWoErr(w, http.StatusNotFound, "There is no such bucket")
+	if present && empty {
+		err := os.Remove("data/" + path)
+		if err != nil {
+			DisplayError(w, http.StatusInternalServerError, "Failed to delete the bucket: ", err)
+			return
+		} else {
+			DisplaySuccess(w, http.StatusOK, "Successfully deleted the bucket")
+			// erasing all of its contents
+			err = buckets_csv.Truncate(0)
+			if err != nil {
+				DisplayError(w, http.StatusInternalServerError, "Failed to truncate the metadata storage: ", err)
+				return
+			}
+
+			_, err = buckets_csv.Seek(0, 0)
+			if err != nil {
+				DisplayError(w, http.StatusInternalServerError, "Failed to move the cursor to the origin: ", err)
+				return
+			}
+
+			csv_writer := csv.NewWriter(buckets_csv)
+			defer csv_writer.Flush()
+
+			for _, record := range updatedRecords {
+				if err := csv_writer.Write(record); err != nil {
+					DisplayError(w, http.StatusInternalServerError, "Failed to write to the metadata storage: ", err)
+					return
+				}
+			}
+		}
+	} else if present && !empty {
+		DisplayErrorWoErr(w, http.StatusMethodNotAllowed, "Failed to delete the bucket - it is not empty")
+		return
+	} else if !present {
+		DisplayErrorWoErr(w, http.StatusNotFound, "There is no such bucket")
+		return
+	}
 }
