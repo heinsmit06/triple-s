@@ -18,6 +18,6 @@ func Run() {
 	router.HandleFunc("GET /{BucketName}/{ObjectKey}", internal.GetObjects)
 	router.HandleFunc("DELETE /{BucketName}/{ObjectKey}", internal.DeleteObjects)
 
-	fmt.Println("Server is listening to :8080")
-	http.ListenAndServe(":8080", router)
+	fmt.Println("Server is listening to :8000")
+	http.ListenAndServe(":8000", router)
 }

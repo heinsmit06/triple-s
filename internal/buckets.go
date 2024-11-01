@@ -227,7 +227,7 @@ func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
 			DisplayError(w, http.StatusInternalServerError, "Failed to delete the bucket: ", err)
 			return
 		} else {
-			DisplaySuccess(w, http.StatusOK, "Successfully deleted the bucket")
+			DisplaySuccess(w, http.StatusNoContent, "Successfully deleted the bucket")
 			// erasing all of its contents
 			err = buckets_csv.Truncate(0)
 			if err != nil {
