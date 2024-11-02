@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/csv"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,14 @@ import (
 	"strings"
 	"time"
 )
+
+type Object struct {
+	XMLName          xml.Name `xml:"object"`
+	ObjectKey        string
+	Size             string
+	ContentType      string
+	LastModifiedTime string
+}
 
 func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	path := req.URL.Path[1:]
@@ -116,7 +125,107 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 }
 
 func GetObjects(w http.ResponseWriter, req *http.Request) {
+	path := req.URL.Path[1:]
+	pathSlice := strings.Split(path, "/")
+	bucketName := pathSlice[0]
+	fmt.Println("path: " + path)
+	fmt.Println("bucket name: " + bucketName)
+
+	bucketsCsv, err := os.Open("data/buckets.csv")
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to open the buckets.csv: ", err)
+		return
+	}
+	defer bucketsCsv.Close()
+
+	bucketsCsvReader := csv.NewReader(bucketsCsv)
+	bucketStorage, err := bucketsCsvReader.ReadAll()
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to read data from buckets.csv: ", err)
+		return
+	}
+
+	// checking if a bucket exists in the buckets.csv metadata storage
+	var bucketExistence bool
+	for _, record := range bucketStorage {
+		if record[0] == bucketName {
+			bucketExistence = true
+			break
+		}
+	}
+
+	// if bucket does not exist - display an error
+	if !bucketExistence {
+		DisplayErrorWoErr(w, http.StatusNotFound, "No such bucket exists")
+		return
+	}
+
+	// checking if an object exists in the objects.csv metadata storage
+	objectsCsv, err := os.Open("data/" + bucketName + "/objects.csv")
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to open objects.csv: ", err)
+		return
+	}
+	defer objectsCsv.Close()
+
+	objectsCsvReader := csv.NewReader(objectsCsv)
+	objectsRecords, err := objectsCsvReader.ReadAll()
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to read data from objects.csv: ", err)
+		return
+	}
+
+	// checking if an object exists in the objects.csv metadata storage
+	var objectExistence bool
+	var objectID int
+	for i, record := range objectsRecords {
+		if record[0] == pathSlice[1] {
+			objectExistence = true
+			objectID = i
+			break
+		}
+	}
+
+	// if an object does not exist - display an error
+	if !objectExistence {
+		DisplayErrorWoErr(w, http.StatusNotFound, "Such object does not exist")
+		return
+	}
+
+	// opening the file to get its binary data
+	file, err := os.Open("data/" + path)
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to open the file to read its binary data: ", err)
+		return
+	}
+	defer file.Close()
+
+	binaryFile, err := io.ReadAll(file)
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to read binary content of the file: ", err)
+		return
+	}
+
+	// setting headers and writing to http.ResponseWriter
+	w.Header().Set("Content-Length", objectsRecords[objectID][1])
+	w.Header().Set("Content-Type", objectsRecords[objectID][2])
+	w.Header().Set("Last-Modified", objectsRecords[objectID][3])
+	w.Write(binaryFile)
 }
 
 func DeleteObjects(w http.ResponseWriter, req *http.Request) {
 }
+
+// object := Object{
+// 	ObjectKey:        objectsRecords[objectID][0],
+// 	Size:             objectsRecords[objectID][1],
+// 	ContentType:      objectsRecords[objectID][2],
+// 	LastModifiedTime: objectsRecords[objectID][3],
+// }
+
+// out, err := xml.MarshalIndent(object, " ", "  ")
+// if err != nil {
+// 	DisplayError(w, 500, "Failed to encode XML", err)
+// 	return
+// }
+// w.Write(out)
