@@ -51,26 +51,66 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	defer objectsCsv.Close()
 
 	// preparing object metada
-	timeNow := time.Now().Format(time.RFC850)
-
-	// detecting the content type based on request body
+	lastModifiedTime := time.Now().Format(time.RFC850)
 	contentType := http.DetectContentType(objectContent)
 	fileInfo, err := os.Stat("data/" + path)
 	if err != nil {
 		DisplayError(w, http.StatusInternalServerError, "Failed to open the file: ", err)
 		return
 	}
-
 	size := strconv.Itoa(int(fileInfo.Size()))
-	record := []string{pathSlice[1], size, contentType, timeNow}
+	record := []string{pathSlice[1], size, contentType, lastModifiedTime}
+
+	// checking if the same object was already in the .csv storage
+	csvReader := csv.NewReader(objectsCsv)
+	records, err := csvReader.ReadAll()
+	alreadyPresent := false
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to read the metada from objects.csv: ", err)
+		return
+	}
+	var newRecords [][]string
+	for _, v := range records {
+		if v[0] == pathSlice[1] {
+			alreadyPresent = true
+			newRecords = append(newRecords, record)
+		} else {
+			newRecords = append(newRecords, v)
+		}
+	}
+
+	// depending on whether the object was already in the bucket:
+	// either adding metadata of a new object
+	// or updating metadata of an existing object
 
 	// writing to objects.csv
 	csv_writer := csv.NewWriter(objectsCsv)
-	if err := csv_writer.Write(record); err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to write/append to objects.csv: ", err)
-		return
-	}
 	defer csv_writer.Flush()
+	if alreadyPresent {
+		err = objectsCsv.Truncate(0)
+		if err != nil {
+			DisplayError(w, http.StatusInternalServerError, "Failed to truncate the metadata storage: ", err)
+			return
+		}
+
+		_, err = objectsCsv.Seek(0, 0)
+		if err != nil {
+			DisplayError(w, http.StatusInternalServerError, "Failed to move the cursor to the origin: ", err)
+			return
+		}
+
+		for _, record := range newRecords {
+			if err := csv_writer.Write(record); err != nil {
+				DisplayError(w, http.StatusInternalServerError, "Failed to write to the metadata storage: ", err)
+				return
+			}
+		}
+	} else {
+		if err := csv_writer.Write(record); err != nil {
+			DisplayError(w, http.StatusInternalServerError, "Failed to write/append to objects.csv: ", err)
+			return
+		}
+	}
 
 	DisplaySuccess(w, 200, "Object was created and metadata was written")
 }
