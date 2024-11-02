@@ -215,17 +215,3 @@ func GetObjects(w http.ResponseWriter, req *http.Request) {
 
 func DeleteObjects(w http.ResponseWriter, req *http.Request) {
 }
-
-// object := Object{
-// 	ObjectKey:        objectsRecords[objectID][0],
-// 	Size:             objectsRecords[objectID][1],
-// 	ContentType:      objectsRecords[objectID][2],
-// 	LastModifiedTime: objectsRecords[objectID][3],
-// }
-
-// out, err := xml.MarshalIndent(object, " ", "  ")
-// if err != nil {
-// 	DisplayError(w, 500, "Failed to encode XML", err)
-// 	return
-// }
-// w.Write(out)
