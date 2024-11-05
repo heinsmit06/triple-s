@@ -71,13 +71,14 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	record := []string{pathSlice[1], size, contentType, lastModifiedTime}
 
 	// checking if the same object was already in the .csv storage
+	alreadyPresent := false
 	csvReader := csv.NewReader(objectsCsv)
 	records, err := csvReader.ReadAll()
-	alreadyPresent := false
 	if err != nil {
 		DisplayError(w, http.StatusInternalServerError, "Failed to read the metada from objects.csv: ", err)
 		return
 	}
+
 	var newRecords [][]string
 	for _, v := range records {
 		if v[0] == pathSlice[1] {
@@ -96,30 +97,44 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	csv_writer := csv.NewWriter(objectsCsv)
 	defer csv_writer.Flush()
 	if alreadyPresent {
-		err = objectsCsv.Truncate(0)
-		if err != nil {
-			DisplayError(w, http.StatusInternalServerError, "Failed to truncate the metadata storage: ", err)
-			return
-		}
-
-		_, err = objectsCsv.Seek(0, 0)
-		if err != nil {
-			DisplayError(w, http.StatusInternalServerError, "Failed to move the cursor to the origin: ", err)
-			return
-		}
-
-		for _, record := range newRecords {
-			if err := csv_writer.Write(record); err != nil {
-				DisplayError(w, http.StatusInternalServerError, "Failed to write to the metadata storage: ", err)
-				return
-			}
-		}
+		UpdateCSV(objectsCsv, w, newRecords, csv_writer)
 	} else {
 		if err := csv_writer.Write(record); err != nil {
 			DisplayError(w, http.StatusInternalServerError, "Failed to write/append to objects.csv: ", err)
 			return
 		}
 	}
+
+	// setting the status of a bucket as Active in buckets.csv
+	// and updating its last modified time
+	bucketsCsv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
+		return
+	}
+	defer bucketsCsv.Close()
+
+	csvReaderBuckets := csv.NewReader(bucketsCsv)
+	bucketRecords, err := csvReaderBuckets.ReadAll()
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to read the buckets.csv: ", err)
+		return
+	}
+
+	var newBucketRecords [][]string
+	for _, bucketRecord := range bucketRecords {
+		if bucketRecord[0] == bucketName {
+			newBucketRecord := []string{bucketName, bucketRecord[1], time.Now().Format(time.RFC850), "False"}
+			newBucketRecords = append(newBucketRecords, newBucketRecord)
+		} else {
+			newBucketRecords = append(newBucketRecords, bucketRecord)
+		}
+	}
+
+	// writing to the buckets.csv the lastModifiedTime and Empty/Not Empty
+	csvWriterBuckets := csv.NewWriter(bucketsCsv)
+	defer csvWriterBuckets.Flush()
+	UpdateCSV(bucketsCsv, w, newBucketRecords, csvWriterBuckets)
 
 	DisplaySuccess(w, 200, "Object was created and metadata was written")
 }
@@ -214,4 +229,25 @@ func GetObjects(w http.ResponseWriter, req *http.Request) {
 }
 
 func DeleteObjects(w http.ResponseWriter, req *http.Request) {
+}
+
+func UpdateCSV(csvFile *os.File, w http.ResponseWriter, newRecords [][]string, csvWriter *csv.Writer) {
+	err := csvFile.Truncate(0)
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to truncate the metadata storage: ", err)
+		return
+	}
+
+	_, err = csvFile.Seek(0, 0)
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to move the cursor to the origin: ", err)
+		return
+	}
+
+	for _, record := range newRecords {
+		if err := csvWriter.Write(record); err != nil {
+			DisplayError(w, http.StatusInternalServerError, "Failed to write to the metadata storage: ", err)
+			return
+		}
+	}
 }
