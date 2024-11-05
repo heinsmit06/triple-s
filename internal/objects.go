@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"triple-s/utils"
 )
 
 type Object struct {
@@ -28,33 +30,29 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	fmt.Println("bucket name: " + bucketName)
 
 	// checking whether a bucket exists or not
-	_, err := os.Stat("data/" + bucketName)
-	if os.IsNotExist(err) {
-		DisplayError(w, http.StatusInternalServerError, "There is no such directory: ", err)
-		return
-	} else if err != nil {
-		DisplayError(w, http.StatusNotFound, "Failed to check the directory presence: ", err)
+	bucketExistence := utils.CheckBucketExistence(w, bucketName)
+	if !bucketExistence {
 		return
 	}
 
 	// reading request body
 	objectContent, err := io.ReadAll(req.Body)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to read binary content of the request", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to read binary content of the request", err)
 		return
 	}
 
 	// creating an object
 	err = os.WriteFile("data/"+path, objectContent, 0o644)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to create a file", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to create a file", err)
 		return
 	}
 
 	// creating objects.csv: it either appends or creates new entries
 	objectsCsv, err := os.OpenFile("data/"+bucketName+"/objects.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Error creating objects.csv", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Error creating objects.csv", err)
 		return
 	}
 	defer objectsCsv.Close()
@@ -64,7 +62,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	contentType := http.DetectContentType(objectContent)
 	fileInfo, err := os.Stat("data/" + path)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to open the file: ", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open the file: ", err)
 		return
 	}
 	size := strconv.Itoa(int(fileInfo.Size()))
@@ -75,7 +73,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	csvReader := csv.NewReader(objectsCsv)
 	records, err := csvReader.ReadAll()
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to read the metada from objects.csv: ", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to read the metada from objects.csv: ", err)
 		return
 	}
 
@@ -97,10 +95,10 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	csv_writer := csv.NewWriter(objectsCsv)
 	defer csv_writer.Flush()
 	if alreadyPresent {
-		UpdateCSV(objectsCsv, w, newRecords, csv_writer)
+		utils.UpdateCSV(objectsCsv, w, newRecords, csv_writer)
 	} else {
 		if err := csv_writer.Write(record); err != nil {
-			DisplayError(w, http.StatusInternalServerError, "Failed to write/append to objects.csv: ", err)
+			utils.DisplayError(w, http.StatusInternalServerError, "Failed to write/append to objects.csv: ", err)
 			return
 		}
 	}
@@ -109,7 +107,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	// and updating its last modified time
 	bucketsCsv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
 		return
 	}
 	defer bucketsCsv.Close()
@@ -117,7 +115,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	csvReaderBuckets := csv.NewReader(bucketsCsv)
 	bucketRecords, err := csvReaderBuckets.ReadAll()
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to read the buckets.csv: ", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to read the buckets.csv: ", err)
 		return
 	}
 
@@ -134,9 +132,9 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	// writing to the buckets.csv the lastModifiedTime and Empty/Not Empty
 	csvWriterBuckets := csv.NewWriter(bucketsCsv)
 	defer csvWriterBuckets.Flush()
-	UpdateCSV(bucketsCsv, w, newBucketRecords, csvWriterBuckets)
+	utils.UpdateCSV(bucketsCsv, w, newBucketRecords, csvWriterBuckets)
 
-	DisplaySuccess(w, 200, "Object was created and metadata was written")
+	utils.DisplaySuccess(w, 200, "Object was created and metadata was written")
 }
 
 func GetObjects(w http.ResponseWriter, req *http.Request) {
@@ -146,78 +144,29 @@ func GetObjects(w http.ResponseWriter, req *http.Request) {
 	fmt.Println("path: " + path)
 	fmt.Println("bucket name: " + bucketName)
 
-	bucketsCsv, err := os.Open("data/buckets.csv")
-	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to open the buckets.csv: ", err)
-		return
-	}
-	defer bucketsCsv.Close()
-
-	bucketsCsvReader := csv.NewReader(bucketsCsv)
-	bucketStorage, err := bucketsCsvReader.ReadAll()
-	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to read data from buckets.csv: ", err)
-		return
-	}
-
-	// checking if a bucket exists in the buckets.csv metadata storage
-	var bucketExistence bool
-	for _, record := range bucketStorage {
-		if record[0] == bucketName {
-			bucketExistence = true
-			break
-		}
-	}
-
-	// if bucket does not exist - display an error
+	// checking bucket existence
+	bucketExistence := utils.CheckBucketExistence(w, bucketName)
 	if !bucketExistence {
-		DisplayErrorWoErr(w, http.StatusNotFound, "No such bucket exists")
 		return
 	}
 
 	// checking if an object exists in the objects.csv metadata storage
-	objectsCsv, err := os.Open("data/" + bucketName + "/objects.csv")
-	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to open objects.csv: ", err)
-		return
-	}
-	defer objectsCsv.Close()
-
-	objectsCsvReader := csv.NewReader(objectsCsv)
-	objectsRecords, err := objectsCsvReader.ReadAll()
-	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to read data from objects.csv: ", err)
-		return
-	}
-
-	// checking if an object exists in the objects.csv metadata storage
-	var objectExistence bool
-	var objectID int
-	for i, record := range objectsRecords {
-		if record[0] == pathSlice[1] {
-			objectExistence = true
-			objectID = i
-			break
-		}
-	}
-
-	// if an object does not exist - display an error
+	objectExistence, objectID, objectsRecords := utils.CheckObjectExistence(w, bucketName, pathSlice[1])
 	if !objectExistence {
-		DisplayErrorWoErr(w, http.StatusNotFound, "Such object does not exist")
 		return
 	}
 
 	// opening the file to get its binary data
 	file, err := os.Open("data/" + path)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to open the file to read its binary data: ", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open the file to read its binary data: ", err)
 		return
 	}
 	defer file.Close()
 
 	binaryFile, err := io.ReadAll(file)
 	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to read binary content of the file: ", err)
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to read binary content of the file: ", err)
 		return
 	}
 
@@ -229,25 +178,98 @@ func GetObjects(w http.ResponseWriter, req *http.Request) {
 }
 
 func DeleteObjects(w http.ResponseWriter, req *http.Request) {
-}
+	path := req.URL.Path[1:]
+	pathSlice := strings.Split(path, "/")
+	bucketName := pathSlice[0]
+	fmt.Println("path: " + path)
+	fmt.Println("bucket name: " + bucketName)
 
-func UpdateCSV(csvFile *os.File, w http.ResponseWriter, newRecords [][]string, csvWriter *csv.Writer) {
-	err := csvFile.Truncate(0)
-	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to truncate the metadata storage: ", err)
+	bucketExistence := utils.CheckBucketExistence(w, bucketName)
+	if !bucketExistence {
 		return
 	}
 
-	_, err = csvFile.Seek(0, 0)
-	if err != nil {
-		DisplayError(w, http.StatusInternalServerError, "Failed to move the cursor to the origin: ", err)
+	objectExistence, _, objectsRecords := utils.CheckObjectExistence(w, bucketName, pathSlice[1])
+	if !objectExistence {
 		return
 	}
 
-	for _, record := range newRecords {
-		if err := csvWriter.Write(record); err != nil {
-			DisplayError(w, http.StatusInternalServerError, "Failed to write to the metadata storage: ", err)
-			return
+	objectsCsv, err := os.OpenFile("data/"+bucketName+"/objects.csv", os.O_RDWR, 0o644)
+	if err != nil {
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open the objects.csv: ", err)
+		return
+	}
+	defer objectsCsv.Close()
+
+	// deleting the object
+	err = os.Remove("data/" + bucketName + "/" + pathSlice[1])
+	if err != nil {
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to delete the file: ", err)
+		return
+	}
+
+	// deleting its metadata
+	var newObjectRecords [][]string
+	for _, objectRecord := range objectsRecords {
+		if objectRecord[0] == pathSlice[1] {
+			continue
+		} else {
+			newObjectRecords = append(newObjectRecords, objectRecord)
 		}
 	}
+
+	csvWriterObjects := csv.NewWriter(objectsCsv)
+	utils.UpdateCSV(objectsCsv, w, newObjectRecords, csvWriterObjects)
+	csvWriterObjects.Flush()
+
+	// checking if objects.csv is empty and updating the bucket's status
+	_, err = objectsCsv.Seek(0, 0)
+	if err != nil {
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to reset file pointer: ", err)
+		return
+	}
+
+	csvReaderObjects := csv.NewReader(objectsCsv)
+	csvObjectRecords, err := csvReaderObjects.ReadAll()
+	if err != nil {
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to read from objects.csv: ", err)
+		return
+	}
+
+	bucketIsEmpty := "False"
+	if len(csvObjectRecords) == 0 {
+		bucketIsEmpty = "True"
+	}
+	fmt.Println("len of csvObjectRecords: " + strconv.Itoa(len(csvObjectRecords)))
+
+	// updating the last modified time of a bucket in buckets.csv
+	bucketsCsv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
+	if err != nil {
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
+		return
+	}
+	defer bucketsCsv.Close()
+
+	csvReaderBuckets := csv.NewReader(bucketsCsv)
+	bucketRecords, err := csvReaderBuckets.ReadAll()
+	if err != nil {
+		utils.DisplayError(w, http.StatusInternalServerError, "Failed to read the buckets.csv: ", err)
+		return
+	}
+
+	var newBucketRecords [][]string
+	for _, bucketRecord := range bucketRecords {
+		if bucketRecord[0] == bucketName {
+			newBucketRecord := []string{bucketName, bucketRecord[1], time.Now().Format(time.RFC850), bucketIsEmpty}
+			newBucketRecords = append(newBucketRecords, newBucketRecord)
+		} else {
+			newBucketRecords = append(newBucketRecords, bucketRecord)
+		}
+	}
+
+	// writing to the buckets.csv the lastModifiedTime and IsEmpty
+	csvWriterBuckets := csv.NewWriter(bucketsCsv)
+	defer csvWriterBuckets.Flush()
+	utils.UpdateCSV(bucketsCsv, w, newBucketRecords, csvWriterBuckets)
+	w.WriteHeader(http.StatusNoContent)
 }
