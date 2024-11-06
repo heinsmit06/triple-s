@@ -1,12 +1,10 @@
 package main
 
 import (
-	"fmt"
-
 	ts "triple-s/cmd/triple-s"
 )
 
 func main() {
-	fmt.Println("main was started")
+	// fmt.Println("Main was started")
 	ts.Run()
 }

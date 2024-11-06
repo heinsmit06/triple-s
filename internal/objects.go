@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -22,15 +23,37 @@ type Object struct {
 	LastModifiedTime string
 }
 
-func CreateObjects(w http.ResponseWriter, req *http.Request) {
+func CreateObjects(w http.ResponseWriter, req *http.Request, dir string) {
 	path := req.URL.Path[1:]
 	pathSlice := strings.Split(path, "/")
+	fmt.Println(dir)
+
+	if len(pathSlice) < 2 {
+		utils.DisplayErrorWoErr(w, http.StatusBadRequest, "Invalid path format")
+		return
+	}
+
 	bucketName := pathSlice[0]
-	fmt.Println("path: " + path)
-	fmt.Println("bucket name: " + bucketName)
+	objectKey := pathSlice[1]
+
+	fmt.Println("path:", path)
+	fmt.Println("bucket name:", bucketName)
+	fmt.Println("object key:", objectKey)
+
+	pattern := `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$`
+	r, err := regexp.Compile(pattern)
+	if err != nil {
+		utils.DisplayErrorWoErr(w, http.StatusInternalServerError, "Failed to compile regex pattern")
+		return
+	}
+
+	if !r.MatchString(objectKey) {
+		utils.DisplayErrorWoErr(w, http.StatusBadRequest, "Incorrect object name")
+		return
+	}
 
 	// checking whether a bucket exists or not
-	bucketExistence := utils.CheckBucketExistence(w, bucketName)
+	bucketExistence := utils.CheckBucketExistence(w, bucketName, dir)
 	if !bucketExistence {
 		return
 	}
@@ -43,14 +66,14 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// creating an object
-	err = os.WriteFile("data/"+path, objectContent, 0o644)
+	err = os.WriteFile(dir+"/"+path, objectContent, 0o644)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to create a file", err)
 		return
 	}
 
 	// creating objects.csv: it either appends or creates new entries
-	objectsCsv, err := os.OpenFile("data/"+bucketName+"/objects.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	objectsCsv, err := os.OpenFile(dir+"/"+bucketName+"/objects.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Error creating objects.csv", err)
 		return
@@ -60,7 +83,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	// preparing object metada
 	lastModifiedTime := time.Now().Format(time.RFC850)
 	contentType := http.DetectContentType(objectContent)
-	fileInfo, err := os.Stat("data/" + path)
+	fileInfo, err := os.Stat(dir + "/" + path)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open the file: ", err)
 		return
@@ -105,7 +128,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 
 	// setting the status of a bucket as Active in buckets.csv
 	// and updating its last modified time
-	bucketsCsv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
+	bucketsCsv, err := os.OpenFile(dir+"/buckets.csv", os.O_RDWR, 0o644)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
 		return
@@ -137,7 +160,7 @@ func CreateObjects(w http.ResponseWriter, req *http.Request) {
 	utils.DisplaySuccess(w, 200, "Object was created and metadata was written")
 }
 
-func GetObjects(w http.ResponseWriter, req *http.Request) {
+func GetObjects(w http.ResponseWriter, req *http.Request, dir string) {
 	path := req.URL.Path[1:]
 	pathSlice := strings.Split(path, "/")
 	bucketName := pathSlice[0]
@@ -145,19 +168,19 @@ func GetObjects(w http.ResponseWriter, req *http.Request) {
 	fmt.Println("bucket name: " + bucketName)
 
 	// checking bucket existence
-	bucketExistence := utils.CheckBucketExistence(w, bucketName)
+	bucketExistence := utils.CheckBucketExistence(w, bucketName, dir)
 	if !bucketExistence {
 		return
 	}
 
 	// checking if an object exists in the objects.csv metadata storage
-	objectExistence, objectID, objectsRecords := utils.CheckObjectExistence(w, bucketName, pathSlice[1])
+	objectExistence, objectID, objectsRecords := utils.CheckObjectExistence(w, bucketName, pathSlice[1], dir)
 	if !objectExistence {
 		return
 	}
 
 	// opening the file to get its binary data
-	file, err := os.Open("data/" + path)
+	file, err := os.Open(dir + "/" + path)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open the file to read its binary data: ", err)
 		return
@@ -177,24 +200,24 @@ func GetObjects(w http.ResponseWriter, req *http.Request) {
 	w.Write(binaryFile)
 }
 
-func DeleteObjects(w http.ResponseWriter, req *http.Request) {
+func DeleteObjects(w http.ResponseWriter, req *http.Request, dir string) {
 	path := req.URL.Path[1:]
 	pathSlice := strings.Split(path, "/")
 	bucketName := pathSlice[0]
 	fmt.Println("path: " + path)
 	fmt.Println("bucket name: " + bucketName)
 
-	bucketExistence := utils.CheckBucketExistence(w, bucketName)
+	bucketExistence := utils.CheckBucketExistence(w, bucketName, dir)
 	if !bucketExistence {
 		return
 	}
 
-	objectExistence, _, objectsRecords := utils.CheckObjectExistence(w, bucketName, pathSlice[1])
+	objectExistence, _, objectsRecords := utils.CheckObjectExistence(w, bucketName, pathSlice[1], dir)
 	if !objectExistence {
 		return
 	}
 
-	objectsCsv, err := os.OpenFile("data/"+bucketName+"/objects.csv", os.O_RDWR, 0o644)
+	objectsCsv, err := os.OpenFile(dir+"/"+bucketName+"/objects.csv", os.O_RDWR, 0o644)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open the objects.csv: ", err)
 		return
@@ -202,7 +225,7 @@ func DeleteObjects(w http.ResponseWriter, req *http.Request) {
 	defer objectsCsv.Close()
 
 	// deleting the object
-	err = os.Remove("data/" + bucketName + "/" + pathSlice[1])
+	err = os.Remove(dir + "/" + bucketName + "/" + pathSlice[1])
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to delete the file: ", err)
 		return
@@ -243,7 +266,7 @@ func DeleteObjects(w http.ResponseWriter, req *http.Request) {
 	fmt.Println("len of csvObjectRecords: " + strconv.Itoa(len(csvObjectRecords)))
 
 	// updating the last modified time of a bucket in buckets.csv
-	bucketsCsv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
+	bucketsCsv, err := os.OpenFile(dir+"/buckets.csv", os.O_RDWR, 0o644)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
 		return

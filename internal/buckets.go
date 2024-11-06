@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"time"
 
 	"triple-s/utils"
@@ -24,8 +25,8 @@ type Buckets struct {
 	Buckets []Bucket
 }
 
-func GetBuckets(w http.ResponseWriter, req *http.Request) {
-	buckets_csv, err := os.Open("data/buckets.csv")
+func GetBuckets(w http.ResponseWriter, req *http.Request, dir string) {
+	buckets_csv, err := os.Open(dir + "/buckets.csv")
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv: ", err)
 		return
@@ -64,7 +65,7 @@ func GetBuckets(w http.ResponseWriter, req *http.Request) {
 	w.Write(out)
 }
 
-func CreateBuckets(w http.ResponseWriter, req *http.Request) {
+func CreateBuckets(w http.ResponseWriter, req *http.Request, dir string) {
 	// DONE. Bucket names must be unique across the system.
 	// DONE. Names should be between 3 and 63 characters long.
 	// DONE. Only lowercase letters, numbers, hyphens (-), and dots (.) are allowed.
@@ -99,24 +100,38 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	_, errStat := os.Stat("data/" + path)
-	if errStat == nil {
-		utils.DisplayErrorWoErr(w, http.StatusConflict, "Bucket already exists")
-		return
-	} else if !os.IsNotExist(errStat) {
-		utils.DisplayError(w, http.StatusInternalServerError, "Failed to check bucket existence: ", errStat)
+	ipv4Pattern := `^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`
+
+	// Compile the combined regex pattern for IPv4 and IPv6
+	r, _ := regexp.Compile(ipv4Pattern)
+	if r.MatchString(path) {
+		utils.DisplayErrorWoErr(w, http.StatusBadRequest, "Bucket name is formatted as IPv4")
 		return
 	}
 
+	bucketExistence := utils.CheckBucketExists(w, path, dir)
+	if bucketExistence {
+		utils.DisplayErrorWoErr(w, http.StatusConflict, "Bucket already exists")
+		return
+	}
+
+	// _, errStat := os.Stat(dir + "/" + path)
+	// if errStat == nil {
+	// 	return
+	// } else if !os.IsNotExist(errStat) {
+	// 	utils.DisplayError(w, http.StatusInternalServerError, "Failed to check bucket existence: ", errStat)
+	// 	return
+	// }
+
 	// done with checking for errors, now creating the bucket and storing its metadata in a csv file
-	err := os.MkdirAll("data/"+path, 0o755)
+	err := os.MkdirAll(dir+"/"+path, 0o755)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to create a bucket", err)
 		return
 	}
 
 	// storing bucket metadata in metadata storage
-	buckets_csv, ok := os.OpenFile("data/buckets.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
+	buckets_csv, ok := os.OpenFile(dir+"/buckets.csv", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o644)
 	if ok != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Error creating buckets.csv", ok)
 		return
@@ -145,10 +160,10 @@ func CreateBuckets(w http.ResponseWriter, req *http.Request) {
 	utils.DisplaySuccess(w, http.StatusOK, "Bucket was created and metadata is written")
 }
 
-func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
+func DeleteBuckets(w http.ResponseWriter, req *http.Request, dir string) {
 	// getting a path from http.Request and opening csv storage to read the data from
 	path := req.URL.Path[1:]
-	buckets_csv, err := os.OpenFile("data/buckets.csv", os.O_RDWR, 0o644)
+	buckets_csv, err := os.OpenFile(dir+"/buckets.csv", os.O_RDWR, 0o644)
 	if err != nil {
 		utils.DisplayError(w, http.StatusInternalServerError, "Failed to open buckets.csv", err)
 		return
@@ -179,7 +194,7 @@ func DeleteBuckets(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if present && empty {
-		err := os.RemoveAll("data/" + path)
+		err := os.RemoveAll(dir + "/" + path)
 		if err != nil {
 			utils.DisplayError(w, http.StatusInternalServerError, "Failed to delete the bucket: ", err)
 			return

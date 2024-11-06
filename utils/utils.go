@@ -73,8 +73,8 @@ func UpdateCSV(csvFile *os.File, w http.ResponseWriter, newRecords [][]string, c
 	}
 }
 
-func CheckBucketExistence(w http.ResponseWriter, bucketName string) bool {
-	bucketsCsv, err := os.Open("data/buckets.csv")
+func CheckBucketExistence(w http.ResponseWriter, bucketName, dir string) bool {
+	bucketsCsv, err := os.Open(dir + "/buckets.csv")
 	if err != nil {
 		DisplayError(w, http.StatusInternalServerError, "Failed to open the buckets.csv: ", err)
 		return false
@@ -106,10 +106,10 @@ func CheckBucketExistence(w http.ResponseWriter, bucketName string) bool {
 	}
 }
 
-func CheckObjectExistence(w http.ResponseWriter, bucketName string, objectName string) (bool, int, [][]string) {
+func CheckObjectExistence(w http.ResponseWriter, bucketName string, objectName, dir string) (bool, int, [][]string) {
 	var objectID int
 	var objectsRecords [][]string
-	objectsCsv, err := os.OpenFile("data/"+bucketName+"/objects.csv", os.O_RDWR, 0o644)
+	objectsCsv, err := os.OpenFile(dir+"/"+bucketName+"/objects.csv", os.O_RDWR, 0o644)
 	if err != nil {
 		DisplayError(w, http.StatusInternalServerError, "Failed to open objects.csv: ", err)
 		return false, objectID, objectsRecords
@@ -140,4 +140,31 @@ func CheckObjectExistence(w http.ResponseWriter, bucketName string, objectName s
 	}
 
 	return true, objectID, objectsRecords
+}
+
+func CheckBucketExists(w http.ResponseWriter, bucketName, dir string) bool {
+	bucketsCsv, err := os.Open(dir + "/buckets.csv")
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to open the buckets.csv: ", err)
+		return false
+	}
+	defer bucketsCsv.Close()
+
+	bucketsCsvReader := csv.NewReader(bucketsCsv)
+	bucketStorage, err := bucketsCsvReader.ReadAll()
+	if err != nil {
+		DisplayError(w, http.StatusInternalServerError, "Failed to read data from buckets.csv: ", err)
+		return false
+	}
+
+	// checking if a bucket exists in the buckets.csv metadata storage
+	var bucketExistence bool
+	for _, record := range bucketStorage {
+		if record[0] == bucketName {
+			bucketExistence = true
+			return bucketExistence
+		}
+	}
+
+	return bucketExistence
 }
